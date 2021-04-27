@@ -1,0 +1,70 @@
+---
+- hosts: all
+  sudo: yes
+  vars: 
+    pm2_apps:
+      - /var/apps/services/app.js
+      - /var/apps/services/otherapp.js
+      - homeDir: /var/
+      - appDir : apps
+      - repo: my_app
+      - account: mbejda
+      - privateKey: /Users/johnwati/.ssh/id_rsa  
+  
+  pre_tasks:
+    - name: create apps group
+      group: name=apps state=present
+    - name: create apps user
+      user: name=apps comment="Apps User" group=apps home=/var/apps
+    - name: create node apps directory
+      file: path=/var/apps state=directory owner=apps group=apps mode=0775
+    - name: copy node app to apps directory
+      copy: src=./services dest=/var/apps owner=apps group=apps mode=0644
+
+  tasks:    
+    - name: Install Packages
+      apt: name={{ item }} update_cache=yes state=latest
+      with_items:
+        - build-essential
+        - npm
+        - nodejs-legacy
+        - git
+        - mcrypt
+        - nginx
+        - curl
+    - name: install nginx
+      apt: name=nginx state=present update_cache=yes
+      notify:
+        - start nginx
+    - name: configure nginx
+      copy: src={{ item }} dest=/etc/nginx/sites-available/
+      with_fileglob:
+        - ./nginx/*
+      notify:
+        - restart nginx
+    - name: Install pm2
+      npm: name=pm2 global=yes production=yes     
+
+    - name: Running NPM install
+      npm: path={{homeDir}}/{{appDir}}/backened
+      register: npm_finished
+      when: git_finished.changed
+
+    - name: Stop APP
+      sudo_user: ubuntu
+      command: pm2 stop app chdir={{homeDir}}/{{appDir}}/
+      ignore_errors: yes
+
+    - name: Start APP
+      sudo_user: ubuntu
+      command: pm2 start app.js --name app chdir={{homeDir}}/{{appDir}}/
+      ignore_errors: yes
+      when: npm_finished.changed
+
+  handlers:
+    - name: start nginx
+      service: name=nginx state=started
+    - name: restart nginx
+      service: name=nginx state=restarted
+    - name: start pm2
+      service: name=pm2-init.sh state=started
